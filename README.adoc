@@ -1,0 +1,49 @@
+= Limestone
+ifdef::env-github[]
+Gavin Kondrath <78187175+gavink97@users.noreply.github.com>
+v1.0, 2026-10-01
+:homepage: https://gav.ink
+endif::[]
+:toc:
+:icons: font
+
+=== Getting Started
+requirements:
+
+```
+docker
+docker-compose
+```
+
+Before starting the Caddy server ensure you have `traefik/whoami` in your docker images.
+
+```
+docker pull traefik/whoami
+```
+
+=== Endpoints
+Important note: The Admin API is exposed at `0.0.0.0:2019` for injection testing purposes. In a production environment it is best advised to revert to `localhost:2019` or use `admin off`.
+
+==== GET /limestone/pools
+Returns a list of available pools.
+
+==== GET /limestone/members/{pool_name}
+Returns a list of pool members.
+
+==== POST /limestone/test/reconciler/{pool_name}
+This endpoint is designed to test the conditions that cause the reconciler to scale up, scale down, and retire members.
+
+```
+{
+	"id": "member_id"
+	"condition": "unhealthy | healthy | draining | remove | inflight"
+	"inflight_demand": >= 0
+}
+```
+
+=== Injection Testing
+`testing/main.go` serves as a small yet expandable automated injection testing suite for assurance.
+
+`--inflight` flag enables testing inflight injections which expand and decrease pool size.
+
+`--verbose` flag enables verbose info logging of pool members and their state during the injection test.

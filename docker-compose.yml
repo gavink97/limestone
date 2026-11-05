@@ -1,0 +1,11 @@
+services:
+  caddy:
+    build: .
+    ports: ["8080:8080", "2019:2019"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./Caddyfile:/etc/caddy/Caddyfile
+    networks: [internal]
+networks:
+  internal:
+    name: internal

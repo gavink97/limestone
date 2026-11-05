@@ -1,0 +1,30 @@
+{
+	admin 0.0.0.0:2019
+
+	limestone {
+		docker_network internal
+		default_pool web
+
+		pool web {
+			image traefik/whoami
+			backend_port 80
+			health_path /
+			min 1
+			max 4
+			target_inflight 2
+			scale_out_cooldown 3s
+			scale_in_cooldown 15s
+			drain_grace 5s
+		}
+	}
+}
+
+:8080 {
+	route {
+		limestone
+		reverse_proxy {
+			dynamic limestone_pool
+			lb_try_duration 5s
+		}
+	}
+}
