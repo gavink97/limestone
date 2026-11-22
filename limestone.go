@@ -2,6 +2,7 @@ package limestone
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -20,24 +21,52 @@ import (
 // ownerID survives config reloads but changes on restart
 var ownerID = randHex(8)
 
-type PoolConfig struct {
-	Name             string        `json:"name"`
-	Image            string        `json:"image"`
-	BackendPort      int           `json:"backend_port,omitempty"`
-	HealthPath       string        `json:"health_path,omitempty"`
-	Min              int           `json:"min,omitempty"`
-	Max              int           `json:"max,omitempty"`
-	TargetInflight   int           `json:"target_inflight,omitempty"`
-	ScaleOutCooldown time.Duration `json:"scale_out_cooldown,omitempty"`
-	ScaleInCooldown  time.Duration `json:"scale_in_cooldown,omitempty"`
-	DrainGrace       time.Duration `json:"drain_grace,omitempty"`
+type ServiceProviderConfig struct {
+	Name   string `json:"name"`
+	Region string `json:"region,omitempty"`
+	Plan   string `json:"plan,omitempty"`
+
+	Tag    string
+	SSHKEY string
 }
 
-func defaultPoolConfig() PoolConfig {
-	return PoolConfig{
+type ServiceProviderConfigParams struct {
+	Name   string `json:"name"`
+	Region string `json:"region,omitempty"`
+	Plan   string `json:"plan,omitempty"`
+	Tag    string
+}
+
+func NewServiceProviderConfig(params ServiceProviderConfigParams) *ServiceProviderConfig {
+	// generate a unique SSH Key and store
+
+	return &ServiceProviderConfig{
+		Name:   params.Name,
+		Region: params.Region,
+		Plan:   params.Plan,
+		Tag:    params.Tag,
+	}
+}
+
+type PoolConfig struct {
+	Name             string                 `json:"name"`
+	Image            string                 `json:"image"`
+	BackendPort      int                    `json:"backend_port,omitempty"`
+	HealthPath       string                 `json:"health_path,omitempty"`
+	Min              int                    `json:"min,omitempty"`
+	Max              int                    `json:"max,omitempty"`
+	TargetInflight   int                    `json:"target_inflight,omitempty"`
+	ScaleOutCooldown time.Duration          `json:"scale_out_cooldown,omitempty"`
+	ScaleInCooldown  time.Duration          `json:"scale_in_cooldown,omitempty"`
+	DrainGrace       time.Duration          `json:"drain_grace,omitempty"`
+	ServiceProvider  *ServiceProviderConfig `json:"service_provider,omitempty"`
+}
+
+func defaultPoolConfig() *PoolConfig {
+	return &PoolConfig{
 		Name:             "",
 		Image:            "",
-		BackendPort:      0,
+		BackendPort:      80,
 		HealthPath:       "/",
 		Min:              1,
 		Max:              10,
@@ -54,20 +83,22 @@ type poolState struct {
 	busy      atomic.Bool
 }
 
-type routeRule struct {
-	prefix string
-	pool   string
+type RouteRule struct {
+	Prefix string
+	Pool   string
 }
 
 type App struct {
-	DefaultPool   string         `json:"default_pool,omitempty"`
-	DockerNetwork string         `json:"docker_network,omitempty"`
-	TickInterval  caddy.Duration `json:"tick_interval,omitempty"`
-	SpawnTimeout  caddy.Duration `json:"spawn_timeout,omitempty"`
-	KillOnStop    bool           `json:"kill_on_stop,omitempty"`
-	Pools         []PoolConfig   `json:"pools,omitempty"`
+	DefaultPool            string                 `json:"default_pool,omitempty"`
+	DockerNetwork          string                 `json:"docker_network,omitempty"`
+	TickInterval           caddy.Duration         `json:"tick_interval,omitempty"`
+	SpawnTimeout           caddy.Duration         `json:"spawn_timeout,omitempty"`
+	KillOnStop             bool                   `json:"kill_on_stop,omitempty"`
+	Pools                  []PoolConfig           `json:"pools,omitempty"`
+	DefaultServiceProvider *ServiceProviderConfig `json:"default_service_provider,omitempty"`
+	DefaultPoolConfig      *PoolConfig            `json:"default_pool_config,omitempty"`
+	Rules                  []RouteRule            `json:"rules,omitempty"`
 
-	rules       []routeRule
 	reg         *Registry
 	demand      chan string
 	prov        *DockerProvisioner
@@ -102,37 +133,70 @@ func (a *App) Provision(ctx caddy.Context) error {
 	}
 
 	if a.DefaultPool == "" {
-		return fmt.Errorf("default_pool is required")
+		return errors.New("default_pool is required")
+	}
+
+	// ensure this is implemented properly
+	if a.DefaultServiceProvider == nil {
+		a.DefaultServiceProvider = NewServiceProviderConfig(ServiceProviderConfigParams{})
+	}
+
+	if a.DefaultPoolConfig == nil {
+		a.DefaultPoolConfig = defaultPoolConfig()
+	}
+
+	if len(a.Pools) == 0 {
+		return errors.New("atleast one pool must be defined")
 	}
 
 	a.states = make(map[string]*poolState, len(a.Pools))
-	defaultPool := defaultPoolConfig()
 
 	for i := range a.Pools {
 		pc := a.Pools[i]
 
+		if pc.Name == "" {
+			return errors.New("pool name is required")
+		}
+
+		if pc.Image == "" {
+			return errors.New("pool image is required")
+		}
+
+		if pc.BackendPort == 0 {
+			pc.BackendPort = a.DefaultPoolConfig.BackendPort
+		}
+
 		if pc.HealthPath == "" {
-			pc.HealthPath = defaultPool.HealthPath
+			pc.HealthPath = a.DefaultPoolConfig.HealthPath
+		}
+
+		// should probably use a different method to ensure a minimum is set, perhaps checking the presense of the default_pool_config
+		if pc.Min == 0 {
+			pc.Min = a.DefaultPoolConfig.Min
 		}
 
 		if pc.Max == 0 {
-			pc.Max = defaultPool.Max
+			pc.Max = a.DefaultPoolConfig.Max
 		}
 
 		if pc.TargetInflight == 0 {
-			pc.TargetInflight = defaultPool.TargetInflight
+			pc.TargetInflight = a.DefaultPoolConfig.TargetInflight
 		}
 
 		if pc.ScaleOutCooldown == 0 {
-			pc.ScaleOutCooldown = defaultPool.ScaleOutCooldown
+			pc.ScaleOutCooldown = a.DefaultPoolConfig.ScaleOutCooldown
 		}
 
 		if pc.ScaleInCooldown == 0 {
-			pc.ScaleInCooldown = defaultPool.ScaleInCooldown
+			pc.ScaleInCooldown = a.DefaultPoolConfig.ScaleInCooldown
 		}
 
 		if pc.DrainGrace == 0 {
-			pc.DrainGrace = defaultPool.DrainGrace
+			pc.DrainGrace = a.DefaultPoolConfig.DrainGrace
+		}
+
+		if pc.ServiceProvider == nil {
+			pc.ServiceProvider = a.DefaultServiceProvider
 		}
 
 		a.Pools[i] = pc
@@ -143,9 +207,9 @@ func (a *App) Provision(ctx caddy.Context) error {
 		return fmt.Errorf("default_pool %q is not a defined pool", a.DefaultPool)
 	}
 
-	for _, r := range a.rules {
-		if _, ok := a.states[r.pool]; !ok {
-			return fmt.Errorf("route %q references undefined pool %q", r.prefix, r.pool)
+	for _, r := range a.Rules {
+		if _, ok := a.states[r.Pool]; !ok {
+			return fmt.Errorf("route %q references undefined pool %q", r.Prefix, r.Pool)
 		}
 	}
 
@@ -177,7 +241,10 @@ func (a *App) Start() error {
 	for _, o := range orphans {
 		a.reg.AddMember(o.Pool, o.ID, o.Dial, true)
 		a.logger.Info("adopted instance",
-			zap.String("pool", o.Pool), zap.String("id", o.ID), zap.String("dial", o.Dial))
+			zap.String("pool", o.Pool),
+			zap.String("id", o.ID),
+			zap.String("dial", o.Dial),
+		)
 	}
 
 	go a.controlLoop(ctx)
@@ -208,7 +275,9 @@ func (a *App) Stop() error {
 					if err != nil {
 						a.logger.Error(
 							"failed to kill instance",
-							zap.String("id", m.ID), zap.Error(err))
+							zap.String("id", m.ID),
+							zap.Error(err),
+						)
 					}
 				})
 		}
@@ -228,12 +297,15 @@ func (a *App) Cleanup() error {
 // Route decides which pool serves a request. STAND-IN for the DB-backed
 // resolver: replace with a TTL-cached lookup + singleflight when you wire
 // in a real database.
+
+// rules prints nil
 func (a *App) Route(r *http.Request) string {
-	for _, rule := range a.rules {
-		if strings.HasPrefix(r.URL.Path, rule.prefix) {
-			return rule.pool
+	for _, rule := range a.Rules {
+		if strings.HasPrefix(r.URL.Path, rule.Prefix) {
+			return rule.Pool
 		}
 	}
+
 	return a.DefaultPool
 }
 

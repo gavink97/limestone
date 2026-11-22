@@ -3,18 +3,41 @@
 
 	limestone {
 		docker_network internal
-		default_pool web
+		default_pool inventory
 
-		pool web {
-			image traefik/whoami
-			backend_port 80
-			health_path /
+		default_pool_config {
 			min 1
-			max 4
 			target_inflight 2
 			scale_out_cooldown 3s
 			scale_in_cooldown 15s
 			drain_grace 5s
+		}
+
+		rules {
+			/api/catalog catalog
+			/api/inventory inventory
+			/api/checkout checkout
+		}
+
+		pool catalog {
+			image traefik/whoami
+			backend_port 80
+			health_path /
+			max 2
+		}
+
+		pool inventory {
+			image traefik/whoami
+			backend_port 80
+			health_path /
+			max 4
+		}
+
+		pool checkout {
+			image traefik/whoami
+			backend_port 80
+			health_path /
+			max 12
 		}
 	}
 }

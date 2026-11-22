@@ -1,13 +1,14 @@
 = Limestone
 ifdef::env-github[]
 Gavin Kondrath <78187175+gavink97@users.noreply.github.com>
-v1.0, 2026-10-01
+v1.0, 2026-11-22
 :homepage: https://gav.ink
 endif::[]
 :toc:
 :icons: font
 
-=== Getting Started
+== Getting Started
+=== Installation
 requirements:
 
 ```
@@ -15,13 +16,90 @@ docker
 docker-compose
 ```
 
-Before starting the Caddy server ensure you have `traefik/whoami` in your docker images.
-
+Ensure you have any docker images you need pulled (or built) before starting Limestone. For example:
 ```
 docker pull traefik/whoami
 ```
 
-=== Endpoints
+== Caddyfile
+
+=== Limestone Options
+You can check `Caddyfile.example` for quickstart boilerplate
+
+==== Docker Network
+```
+docker_network {docker_network}
+```
+
+Defines the docker network the members of the pool will join.
+
+==== Default Pool
+```
+default_pool {pool_name}
+```
+
+Defines the default pool limestone will route to. *This is required.*
+
+==== Default Pool Config
+```
+default_pool_config {
+	backend_port 80
+	health_path /
+	min 1
+	max 4
+	target_inflight 2
+	scale_out_cooldown 3s
+	scale_in_cooldown 15s
+	drain_grace 5s
+}
+```
+
+Defines the default pool configuration for all pools. Pools will inherit these attributes if not defined.
+
+==== Rules
+```
+rules {
+	/api/abc {pool_name}
+	/api/xyz {pool_name}
+}
+```
+
+When using multiple pools you can define routing rules. Limestone will route to a pool based on the defined prefix.
+
+==== Pool {pool_name}
+```
+pool {pool_name} {
+	image {docker_image_name}
+	backend_port 80
+	health_path /
+	min 1
+	max 4
+	target_inflight 2
+	scale_out_cooldown 3s
+	scale_in_cooldown 15s
+	drain_grace 5s
+}
+```
+
+Defines a pool limestone will create and route to. *A `pool_name` and `image` are required to define a pool.*
+
+=== Route Requirements
+*Ensure limestone is defined in your `route` and limestone_pool in `reverse_proxy`*
+
+```
+:8080 {
+	route {
+		limestone
+		reverse_proxy {
+			dynamic limestone_pool
+			lb_try_duration 5s
+		}
+	}
+```
+
+== Testing
+
+=== Developer Endpoints
 Important note: The Admin API is exposed at `0.0.0.0:2019` for injection testing purposes. In a production environment it is best advised to revert to `localhost:2019` or use `admin off`.
 
 ==== GET /limestone/pools

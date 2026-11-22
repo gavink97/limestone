@@ -2,6 +2,7 @@ package limestone
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -32,7 +33,7 @@ func (a *AdminAPI) Provision(ctx caddy.Context) error {
 
 	app, ok := appIface.(*App)
 	if !ok {
-		return fmt.Errorf("limestone app is not *App")
+		return errors.New("limestone app is not *App")
 	}
 
 	a.app = app

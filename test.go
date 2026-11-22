@@ -1,6 +1,7 @@
 package limestone
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -63,7 +64,7 @@ func (a *App) injectTestCondition(pool string, req reconcileRequest) (map[string
 
 func (a *App) resolveMember(pool, ref string) (string, error) {
 	if ref == "" {
-		return "", fmt.Errorf("member id is required for this condition")
+		return "", errors.New("member id is required for this condition")
 	}
 
 	var hit string
